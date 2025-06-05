@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/contours2surface.py" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
