@@ -10,264 +10,137 @@
         git sha              : $Format:%H$
         copyright            : (C) 2025 by CRESCENT
         email                : lbachelo@uoregon.edu
- ***************************************************************************/
+***************************************************************************/
 
 /***************************************************************************
  *                                                                         *
- *   This program is free software; you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
+ *   This program is free software; you can redistribute it and/or modify *
+ *   it under the terms of the GNU General Public License as published by *
  *   the Free Software Foundation; either version 2 of the License, or     *
  *   (at your option) any later version.                                   *
  *                                                                         *
  ***************************************************************************/
 """
-from qgis.PyQt.QtCore import QSettings, QTranslator, QCoreApplication
+
+from qgis.PyQt.QtCore import QCoreApplication, QSettings, QTranslator
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
+from qgis.core import QgsProject, QgsVectorLayer
+import os, tempfile, json
 
-
-# Initialize Qt resources from file resources.py
-from .resources import *
-# Import the code for the dialog
-from .contours2surface_dialog import Contours2SurfacePluginDialog
-import os.path
 from .ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
-from .ccfm.geom import (
-    sample_polyline,
-    sample_polyline_to_n_pts,
-    add_fixed_elev_to_trace,
-    haversine_distance,
-    _draw_pt_profile,
-    get_contours_from_profiles,
-)
-import tempfile, os, json
-
-
+from .ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours
 
 class Contours2SurfacePlugin:
-    """QGIS Plugin Implementation."""
-
     def __init__(self, iface):
-        """Constructor.
-
-        :param iface: An interface instance that will be passed to this class
-            which provides the hook by which you can manipulate the QGIS
-            application at run time.
-        :type iface: QgsInterface
-        """
-        # Save reference to the QGIS interface
         self.iface = iface
-        # initialize plugin directory
         self.plugin_dir = os.path.dirname(__file__)
-        # initialize locale
         locale = QSettings().value('locale/userLocale')[0:2]
-        locale_path = os.path.join(
-            self.plugin_dir,
-            'i18n',
-            'Contours2SurfacePlugin_{}.qm'.format(locale))
-
+        locale_path = os.path.join(self.plugin_dir, 'i18n', f'Contours2SurfacePlugin_{locale}.qm')
         if os.path.exists(locale_path):
             self.translator = QTranslator()
             self.translator.load(locale_path)
             QCoreApplication.installTranslator(self.translator)
-
-        # Declare instance attributes
         self.actions = []
-        self.menu = self.tr(u'&Contours2Surface')
-
-        # Check if plugin was started the first time in current QGIS session
-        # Must be set in initGui() to survive plugin reloads
+        self.menu = self.tr('&Contours2Surface')
         self.first_start = None
 
-    # noinspection PyMethodMayBeStatic
     def tr(self, message):
-        """Get the translation for a string using Qt translation API.
-
-        We implement this ourselves since we do not inherit QObject.
-
-        :param message: String for translation.
-        :type message: str, QString
-
-        :returns: Translated version of message.
-        :rtype: QString
-        """
-        # noinspection PyTypeChecker,PyArgumentList,PyCallByClass
         return QCoreApplication.translate('Contours2SurfacePlugin', message)
 
-
-    def add_action(
-        self,
-        icon_path,
-        text,
-        callback,
-        enabled_flag=True,
-        add_to_menu=True,
-        add_to_toolbar=True,
-        status_tip=None,
-        whats_this=None,
-        parent=None):
-        """Add a toolbar icon to the toolbar.
-
-        :param icon_path: Path to the icon for this action. Can be a resource
-            path (e.g. ':/plugins/foo/bar.png') or a normal file system path.
-        :type icon_path: str
-
-        :param text: Text that should be shown in menu items for this action.
-        :type text: str
-
-        :param callback: Function to be called when the action is triggered.
-        :type callback: function
-
-        :param enabled_flag: A flag indicating if the action should be enabled
-            by default. Defaults to True.
-        :type enabled_flag: bool
-
-        :param add_to_menu: Flag indicating whether the action should also
-            be added to the menu. Defaults to True.
-        :type add_to_menu: bool
-
-        :param add_to_toolbar: Flag indicating whether the action should also
-            be added to the toolbar. Defaults to True.
-        :type add_to_toolbar: bool
-
-        :param status_tip: Optional text to show in a popup when mouse pointer
-            hovers over the action.
-        :type status_tip: str
-
-        :param parent: Parent widget for the new action. Defaults None.
-        :type parent: QWidget
-
-        :param whats_this: Optional text to show in the status bar when the
-            mouse pointer hovers over the action.
-
-        :returns: The action that was created. Note that the action is also
-            added to self.actions list.
-        :rtype: QAction
-        """
-
+    def add_action(self, icon_path, text, callback, enabled_flag=True, add_to_menu=True,
+                   add_to_toolbar=True, status_tip=None, whats_this=None, parent=None):
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
         action.setEnabled(enabled_flag)
-
-        if status_tip is not None:
+        if status_tip:
             action.setStatusTip(status_tip)
-
-        if whats_this is not None:
+        if whats_this:
             action.setWhatsThis(whats_this)
-
         if add_to_toolbar:
-            # Adds plugin icon to Plugins toolbar
             self.iface.addToolBarIcon(action)
-
         if add_to_menu:
-            self.iface.addPluginToMenu(
-                self.menu,
-                action)
-
+            self.iface.addPluginToMenu(self.menu, action)
         self.actions.append(action)
-
         return action
 
     def initGui(self):
-        """Create the menu entries and toolbar icons inside the QGIS GUI."""
-
-        icon_path = ':/plugins/contours2surface.py/icon.png'
+        icon_path = os.path.join(self.plugin_dir, "icon.png")
         self.add_action(
             icon_path,
-            text=self.tr(u'Generate 3D Surface from Contours'),
+            text=self.tr('Generate 3D Surface from Contours'),
             callback=self.run,
             parent=self.iface.mainWindow())
-
-        # will be set False in run()
         self.first_start = True
 
-
     def unload(self):
-        """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
-            self.iface.removePluginMenu(
-                self.tr(u'&Contours2Surface'),
-                action)
+            self.iface.removePluginMenu(self.menu, action)
             self.iface.removeToolBarIcon(action)
-
-    def prepare_fault_contours(fault_contours, **kwargs):
-        fc_sorted = fault_contours
-        trace = fc_sorted[0]
-        trace_sampled = sample_polyline(trace['geometry']['coordinates'], **kwargs)
-        trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
-
-        contours_out = [trace_sampled]
-        n_trace_pts = len(trace_sampled)
-        for trace in fc_sorted[1:]:
-            trace_sampled = sample_polyline_to_n_pts(trace['geometry']['coordinates'], n_trace_pts)
-            trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
-            contours_out.append(trace_sampled)
-        return contours_out
-
-    def make_mesh_from_prepared_contours(contours, down_dip_pt_spacing):
-        num_contour_sets = len(contours) - 1
-        all_contours = []
-
-        for i_cs in range(num_contour_sets):
-            top_z = contours[i_cs][0][2]
-            bottom_z = contours[i_cs + 1][0][2]
-            vert_distance = (top_z - bottom_z) / 1000.0
-            hor_distance = haversine_distance(
-                contours[i_cs][0][0], contours[i_cs][0][1],
-                contours[i_cs + 1][0][0], contours[i_cs + 1][0][1],
-            )
-            down_dip_distance = (vert_distance ** 2 + hor_distance ** 2) ** 0.5
-            n_pts = int(round(down_dip_distance / down_dip_pt_spacing)) + 1
-
-            profiles = [
-                _draw_pt_profile(contours[i_cs][j], contours[i_cs + 1][j], n_pts)
-                for j in range(len(contours[i_cs]))
-            ]
-
-            contour_set = get_contours_from_profiles(profiles, return_top=(i_cs == 0))
-            all_contours.extend(contour_set)
-        return all_contours
 
     def run(self):
         selected_layers = self.iface.layerTreeView().selectedLayers()
 
-        if len(selected_layers) != 3:
-            QMessageBox.warning(None, "Contours2Surface",
-                                "Please select exactly 3 contour layers (top, middle, bottom).")
+        if len(selected_layers) != 1:
+            QMessageBox.warning(None, "Contours2Surface", "Please select one layer containing 3 contour features.")
+            return
+
+        layer = selected_layers[0]
+        features = [f for f in layer.getFeatures()]
+
+        if len(features) != 3:
+            QMessageBox.critical(None, "Contours2Surface", "Selected layer must contain exactly 3 features (top, middle, bottom).")
             return
 
         try:
-            # Save each layer to temporary GeoJSON
-            temp_dir = tempfile.mkdtemp()
-            paths = []
-            for i, layer in enumerate(selected_layers):
-                path = os.path.join(temp_dir, f"contour_{i}.geojson")
-                QgsVectorFileWriter.writeAsVectorFormat(layer, path, "utf-8", layer.crs(), "GeoJSON")
-                paths.append(path)
+            contours_dict = {f["name"].lower(): f for f in features}
+        except KeyError:
+            QMessageBox.critical(None, "Contours2Surface", "Each feature must have a 'name' field: top, middle, bottom.")
+            return
 
-            # Load features
-            contours = []
-            for path in paths:
-                with open(path) as f:
-                    gj = json.load(f)
-                    if len(gj['features']) != 1:
-                        raise ValueError("Each contour layer must contain exactly one feature.")
-                    contours.append(gj['features'][0])
+        required_names = ["top", "middle", "bottom"]
+        if not all(name in contours_dict for name in required_names):
+            QMessageBox.critical(None, "Contours2Surface", "Missing one or more required features named: top, middle, bottom.")
+            return
 
-            # Run meshing
-            prepped = prepare_fault_contours(contours, pt_distance=0.5)
+        try:
+            elev_top = contours_dict["top"]["elev"]
+            elev_mid = contours_dict["middle"]["elev"]
+            elev_bot = contours_dict["bottom"]["elev"]
+        except KeyError:
+            QMessageBox.critical(None, "Contours2Surface", "All contours must have an 'elev' field.")
+            return
+
+        if not (elev_top > elev_mid > elev_bot):
+            QMessageBox.critical(None, "Contours2Surface",
+                                 f"Elevation order invalid:\nTop: {elev_top}, Middle: {elev_mid}, Bottom: {elev_bot}\nExpected: top > middle > bottom")
+            return
+
+        fault_contours = [contours_dict[name] for name in required_names]
+
+        def feature_to_geojson(f):
+            return {
+                "type": "Feature",
+                "geometry": json.loads(f.geometry().asJson()),
+                "properties": {"name": f["name"], "elev": f["elev"]}
+            }
+
+        geojson_features = [feature_to_geojson(f) for f in fault_contours]
+
+        try:
+            prepped = prepare_fault_contours(geojson_features, pt_distance=0.5)
             mesh = make_mesh_from_prepared_contours(prepped, down_dip_pt_spacing=0.5)
             tri_mesh = make_tri_mesh(mesh)
 
+            temp_dir = tempfile.mkdtemp()
             out_geojson = os.path.join(temp_dir, "output_fault.geojson")
+
             write_cfm_tri_meshes(out_geojson, [tri_mesh], [{'properties': {'name': 'output_fault'}}])
 
-            # Load result into QGIS
-            output_layer = QgsVectorLayer(out_geojson, "Fault Mesh", "ogr")
-            if output_layer.isValid():
-                QgsProject.instance().addMapLayer(output_layer)
+            result_layer = QgsVectorLayer(out_geojson, "Fault Mesh", "ogr")
+            if result_layer.isValid():
+                QgsProject.instance().addMapLayer(result_layer)
             else:
                 raise RuntimeError("Generated mesh layer could not be loaded.")
 
