@@ -24,12 +24,14 @@
 
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, QTranslator
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QMessageBox
+from qgis.PyQt.QtWidgets import QAction, QMessageBox, QFileDialog, QInputDialog
 from qgis.core import QgsProject, QgsVectorLayer
 import os, tempfile, json
 
 from .ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
 from .ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours
+from .input_dialog import MeshInputDialog
+
 
 class Contours2SurfacePlugin:
     def __init__(self, iface):
@@ -117,6 +119,16 @@ class Contours2SurfacePlugin:
                                  f"Elevation order invalid:\nTop: {elev_top}, Middle: {elev_mid}, Bottom: {elev_bot}\nExpected: top > middle > bottom")
             return
 
+        # Show the mesh input dialog
+        dlg = MeshInputDialog()
+        if not dlg.exec_():
+            return  # user cancelled
+
+        name, spacing, out_path = dlg.get_values()
+        if not name.strip() or not out_path.strip():
+            QMessageBox.warning(None, "Contours2Surface", "Please fill in all required fields.")
+            return
+
         fault_contours = [contours_dict[name] for name in required_names]
 
         def feature_to_geojson(f):
@@ -129,16 +141,13 @@ class Contours2SurfacePlugin:
         geojson_features = [feature_to_geojson(f) for f in fault_contours]
 
         try:
-            prepped = prepare_fault_contours(geojson_features, pt_distance=0.5)
-            mesh = make_mesh_from_prepared_contours(prepped, down_dip_pt_spacing=0.5)
+            prepped = prepare_fault_contours(geojson_features, pt_distance=spacing)
+            mesh = make_mesh_from_prepared_contours(prepped, down_dip_pt_spacing=spacing)
             tri_mesh = make_tri_mesh(mesh)
 
-            temp_dir = tempfile.mkdtemp()
-            out_geojson = os.path.join(temp_dir, "output_fault.geojson")
+            write_cfm_tri_meshes(out_path, [tri_mesh], [{'properties': {'name': name}}])
 
-            write_cfm_tri_meshes(out_geojson, [tri_mesh], [{'properties': {'name': 'output_fault'}}])
-
-            result_layer = QgsVectorLayer(out_geojson, "Fault Mesh", "ogr")
+            result_layer = QgsVectorLayer(out_path, name, "ogr")
             if result_layer.isValid():
                 QgsProject.instance().addMapLayer(result_layer)
             else:
