@@ -124,7 +124,12 @@ class Contours2SurfacePlugin:
         if not dlg.exec_():
             return  # user cancelled
 
-        name, spacing, out_path = dlg.get_values()
+        name, spacing, out_path, elevation_path = dlg.get_values()
+        print("Contours2Surface Parameters:")
+        print(f"  name: {name}")
+        print(f"  spacing: {spacing}")
+        print(f"  output path: {out_path}")
+        print(f"  elevation path: {elevation_path if elevation_path else 'None'}")
         if not name.strip() or not out_path.strip():
             QMessageBox.warning(None, "Contours2Surface", "Please fill in all required fields.")
             return
@@ -141,7 +146,7 @@ class Contours2SurfacePlugin:
         geojson_features = [feature_to_geojson(f) for f in fault_contours]
 
         try:
-            prepped = prepare_fault_contours(geojson_features, pt_distance=spacing)
+            prepped = prepare_fault_contours(geojson_features, pt_distance=spacing, elevation_path=elevation_path)
             mesh = make_mesh_from_prepared_contours(prepped, down_dip_pt_spacing=spacing)
             tri_mesh = make_tri_mesh(mesh)
 

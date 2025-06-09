@@ -20,6 +20,11 @@ class MeshInputDialog(QDialog):
         self.browse_button = QPushButton("Browse")
         self.browse_button.clicked.connect(self.choose_file)
 
+        self.elevation_label = QLabel("Elevation Raster (optional):")
+        self.elevation_path = QLineEdit()
+        self.elevation_browse = QPushButton("Browse...")
+        self.elevation_browse.clicked.connect(self.select_elevation_file)
+
         form_layout = QVBoxLayout()
 
         # Fault name
@@ -27,6 +32,14 @@ class MeshInputDialog(QDialog):
         name_layout.addWidget(QLabel("Fault Name:"))
         name_layout.addWidget(self.name_input)
         form_layout.addLayout(name_layout)
+
+        # Adding optional elevation file
+        elevation_layout = QHBoxLayout()
+        elevation_layout.addWidget(self.elevation_label)
+        elevation_layout.addWidget(self.elevation_path)
+        elevation_layout.addWidget(self.elevation_browse)
+
+        form_layout.addLayout(elevation_layout)
 
         # Point spacing
         spacing_layout = QHBoxLayout()
@@ -60,5 +73,15 @@ class MeshInputDialog(QDialog):
         if path:
             self.path_input.setText(path)
 
+    def select_elevation_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Elevation Raster", "", "GeoTIFF (*.tif *.tiff)")
+        if path:
+            self.elevation_path.setText(path)
+
     def get_values(self):
-        return self.name_input.text(), self.spacing_input.value(), self.path_input.text()
+        return (
+            self.name_input.text(),
+            float(self.spacing_input.text()),
+            self.path_input.text(),
+            self.elevation_path.text().strip() or None  # Return None if not set
+        )

@@ -5,9 +5,10 @@ from .geom import (
     haversine_distance,
     _draw_pt_profile,
     get_contours_from_profiles,
+    get_values_at_coordinates
 )
 
-def prepare_fault_contours(fault_contours, pt_distance=0.5):
+def prepare_fault_contours(fault_contours, pt_distance=0.5, elevation_path=None):
     trace = fault_contours[0]
     trace_sampled = sample_polyline(trace['geometry']['coordinates'], pt_distance=pt_distance)
     trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
@@ -19,6 +20,21 @@ def prepare_fault_contours(fault_contours, pt_distance=0.5):
         trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
         contours_out.append(trace_sampled)
 
+    # replace fixed elevations with values from raster
+    if elevation_path:
+        try:
+            coords_2d = [pt[:2] for pt in contours_out[0]]  # only top contour
+            elevs = get_values_at_coordinates(elevation_path, coords_2d)
+
+            for j, elev in enumerate(elevs):
+                contours_out[0][j][2] = elev  # apply interpolated Z
+
+            print("Interpolated elevation applied to top contour.")
+
+        except Exception as e:
+            from qgis.PyQt.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "Elevation Error",
+                                 f"Failed to sample elevation data:\n{str(e)}")
     return contours_out
 
 def make_mesh_from_prepared_contours(contours, down_dip_pt_spacing=0.5):
