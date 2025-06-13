@@ -150,44 +150,63 @@ def polyline_length(polyline):
 def _resample_polyline(polyline, interval_km):
     """
     Resamples a polyline at regular intervals specified in kilometers.
-    """
 
-    # We have to handle very short lines sometimes
-    # Not sure if this is the best way to do it but it works for now
-    if polyline_length(polyline) < interval_km:
+    Parameters:
+    -----------
+    polyline : list of [x, y] or [x, y, z]
+        The original polyline to resample.
+    interval_km : float
+        Target spacing between points in kilometers.
+
+    Returns:
+    --------
+    new_polyline : list of [x, y] or [x, y, z]
+        The resampled polyline.
+    """
+    print(f"interpolating polyline at {interval_km} kilometers (_resample_polyline)")
+    if len(polyline) < 2:
+        return polyline
+
+    is_3d = len(polyline[0]) == 3
+
+    total_length = polyline_length(polyline)
+    if total_length < interval_km:
         interval_km = np.mean(polyline_seg_lengths(polyline))
 
-    new_polyline = [polyline[0][0:2]]
+    new_polyline = [polyline[0]]
     remaining_distance = interval_km
 
     for i in range(len(polyline) - 1):
-        start_point = polyline[i]
-        end_point = polyline[i + 1]
-        segment_distance = haversine_distance(
-            start_point[0], start_point[1], end_point[0], end_point[1]
-        )
+        start = polyline[i]
+        end = polyline[i + 1]
+        segment_distance = haversine_distance(start[0], start[1], end[0], end[1])
 
         while segment_distance >= remaining_distance:
-            bearing = azimuth(
-                start_point[0], start_point[1], end_point[0], end_point[1]
-            )
-            new_point = terminal_coords_from_bearing_dist(
-                start_point[0], start_point[1], bearing, remaining_distance
-            )
-            new_polyline.append(list(new_point))
-            start_point = new_point
+            bearing = azimuth(start[0], start[1], end[0], end[1])
+            new_xy = terminal_coords_from_bearing_dist(start[0], start[1], bearing, remaining_distance)
+
+            if is_3d:
+                z_interp = start[2] + (end[2] - start[2]) * (remaining_distance / segment_distance)
+                new_point = [new_xy[0], new_xy[1], z_interp]
+            else:
+                new_point = [new_xy[0], new_xy[1]]
+
+            new_polyline.append(new_point)
+            start = new_point
             segment_distance -= remaining_distance
             remaining_distance = interval_km
 
         remaining_distance -= segment_distance
 
-    # this needs to be fixed to properly know when to append vs. replace
-    # the final point, based on remaining_distance or something
-    if new_polyline[-1] != polyline[-1]:
-        # new_polyline.append(polyline[-1][0:2])
-        new_polyline[-1] = polyline[-1][0:2]
+    # If last point is not close enough to the end, append the real end point
+    last = new_polyline[-1]
+    end = polyline[-1]
+    end_dist = haversine_distance(last[0], last[1], end[0], end[1])
+    if end_dist > 0.25 * interval_km:
+        new_polyline.append(end)
 
     return new_polyline
+
 
 
 def adjust_sampling_distance(poly_length, pt_distance):
@@ -197,47 +216,124 @@ def adjust_sampling_distance(poly_length, pt_distance):
     return new_pt_distance
 
 
-def sample_polyline(
-    polyline, pt_distance, tol=0.1, max_count=100, return_distance=False
-):
-    x0 = pt_distance + 0.0
-    resampled_line = _resample_polyline(polyline, pt_distance)
-    lengths = polyline_seg_lengths(resampled_line)
-    count = 1
-    while np.abs(x0 - lengths[-1]) / x0 > tol and count < max_count:
-        if lengths[-1] < pt_distance:
-            pt_distance -= tol * 0.1  # 1 - len(lengths) / (len(lengths) + 1)
+def sample_polyline(polyline, pt_distance, return_distance=False):
+    """
+    Resample a polyline at uniform spacing (in kilometers) using arc-length interpolation.
+
+    Parameters:
+    -----------
+    polyline : list of [x, y] or [x, y, z]
+        Input polyline to resample.
+    pt_distance : float
+        Desired spacing between consecutive points (in km).
+    return_distance : bool
+        If True, also return the actual spacing used.
+
+    Returns:
+    --------
+    resampled : list of [x, y] or [x, y, z]
+        Resampled polyline with approximately uniform spacing.
+    pt_distance : float (optional)
+        Returned only if return_distance=True.
+    """
+    if len(polyline) < 2:
+        return (polyline, pt_distance) if return_distance else polyline
+
+    is_3d = len(polyline[0]) == 3
+
+    # Compute cumulative arc lengths
+    arc_lengths = [0.0]
+    for i in range(1, len(polyline)):
+        d = haversine_distance(
+            polyline[i - 1][0], polyline[i - 1][1],
+            polyline[i][0], polyline[i][1]
+        )
+        arc_lengths.append(arc_lengths[-1] + d)
+
+    total_length = arc_lengths[-1]
+    if total_length < pt_distance:
+        return (polyline, pt_distance) if return_distance else polyline
+
+    n_points = max(2, int(total_length / pt_distance) + 1)
+    target_distances = np.linspace(0, total_length, n_points)
+    print(f"n_points: {n_points} (sample polyline)")
+    resampled = []
+    j = 0
+    for d in target_distances:
+        while j < len(arc_lengths) - 2 and arc_lengths[j + 1] < d:
+            j += 1
+        t = (d - arc_lengths[j]) / (arc_lengths[j + 1] - arc_lengths[j])
+
+        x1, y1 = polyline[j][:2]
+        x2, y2 = polyline[j + 1][:2]
+        x = x1 + t * (x2 - x1)
+        y = y1 + t * (y2 - y1)
+
+        if is_3d:
+            z1 = polyline[j][2]
+            z2 = polyline[j + 1][2]
+            z = z1 + t * (z2 - z1)
+            resampled.append([x, y, z])
         else:
-            pt_distance += tol * 0.1  # 1 + len(lengths) / (len(lengths) + 1)
+            resampled.append([x, y])
 
-        resampled_line = _resample_polyline(polyline, pt_distance)
-        lengths = polyline_seg_lengths(resampled_line)
-        count += 1
-
-    if return_distance:
-        return resampled_line, pt_distance
-    else:
-        return resampled_line
+    return (resampled, pt_distance) if return_distance else resampled
 
 
-def sample_polyline_to_n_pts(polyline, n_pts, max_count=10):
-    pt_distance = polyline_length(polyline) / (n_pts - 1)
+def sample_polyline_to_n_pts(polyline, n_pts):
+    """
+    Resample a polyline to exactly n_pts using arc-length interpolation.
 
-    new_poly = _resample_polyline(polyline, pt_distance)
+    Parameters:
+    -----------
+    polyline : list of [x, y] or [x, y, z]
+        Input polyline to resample.
+    n_pts : int
+        Desired number of points (must be >= 2).
 
-    count = 0
-    while len(new_poly) != n_pts:
-        count += 1
-        # proportionally adjust the distance to get the correct number of points
-        # print("adjusting")
-        pt_distance *= len(new_poly) / n_pts
-        # print("new distance:", pt_distance)
-        new_poly = _resample_polyline(polyline, pt_distance)
+    Returns:
+    --------
+    list of [x, y] or [x, y, z]
+        Resampled polyline with exactly n_pts.
+    """
+    if len(polyline) < 2 or n_pts < 2:
+        return polyline
 
-        if count > max_count:
-            break
+    is_3d = len(polyline[0]) == 3
 
-    return new_poly
+    # Compute cumulative arc lengths
+    arc_lengths = [0.0]
+    for i in range(1, len(polyline)):
+        d = haversine_distance(
+            polyline[i-1][0], polyline[i-1][1],
+            polyline[i][0], polyline[i][1]
+        )
+        arc_lengths.append(arc_lengths[-1] + d)
+
+    total_length = arc_lengths[-1]
+    target_distances = np.linspace(0, total_length, n_pts)
+
+    resampled = []
+    j = 0
+    for d in target_distances:
+        while j < len(arc_lengths) - 2 and arc_lengths[j+1] < d:
+            j += 1
+        t = (d - arc_lengths[j]) / (arc_lengths[j+1] - arc_lengths[j])
+
+        x1, y1 = polyline[j][:2]
+        x2, y2 = polyline[j+1][:2]
+        x = x1 + t * (x2 - x1)
+        y = y1 + t * (y2 - y1)
+
+        if is_3d:
+            z1 = polyline[j][2]
+            z2 = polyline[j+1][2]
+            z = z1 + t * (z2 - z1)
+            resampled.append([x, y, z])
+        else:
+            resampled.append([x, y])
+
+    return resampled
 
 
 def shift_fault_trace(trace, shift_azimuth, shift_distance):
