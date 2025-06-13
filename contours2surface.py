@@ -25,11 +25,11 @@
 from qgis.PyQt.QtCore import QCoreApplication, QSettings, QTranslator
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox, QFileDialog, QInputDialog
-from qgis.core import QgsProject, QgsVectorLayer
+from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
 import os, tempfile, json
 
 from .ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
-from .ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours
+from .ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours, get_invalid_contour_messages, estimate_triangle_count
 from .input_dialog import MeshInputDialog
 
 
@@ -85,38 +85,49 @@ class Contours2SurfacePlugin:
         selected_layers = self.iface.layerTreeView().selectedLayers()
 
         if len(selected_layers) != 1:
-            QMessageBox.warning(None, "Contours2Surface", "Please select one layer containing 3 contour features.")
+            QMessageBox.warning(None, "Contours2Surface", "Please select one layer containing at least 2 contour features.")
             return
 
         layer = selected_layers[0]
         features = [f for f in layer.getFeatures()]
 
-        if len(features) != 3:
-            QMessageBox.critical(None, "Contours2Surface", "Selected layer must contain exactly 3 features (top, middle, bottom).")
+        # Check geometry type of each feature
+        for f in features:
+            geom = f.geometry()
+            geom_type = QgsWkbTypes.flatType(geom.wkbType())
+            if geom_type != QgsWkbTypes.LineString:
+                QMessageBox.critical(None, "Contours2Surface",
+                                     f"Invalid geometry type: {QgsWkbTypes.displayString(geom.wkbType())}. "
+                                     f"All features must be simple LineStrings.")
+                return
+
+        errors = get_invalid_contour_messages(features)
+
+        if errors:
+            error_msg = "The following contour features are invalid:\n" + "\n".join(errors)
+            QMessageBox.critical(None, "Invalid Contours", error_msg)
+            return  # Cancel processing
+
+        if len(features) < 2:
+            QMessageBox.critical(None, "Contours2Surface", "Selected layer must contain at least 2 contours.")
             return
 
         try:
-            contours_dict = {f["name"].lower(): f for f in features}
+            # Extract features with their elevation
+            features_with_elev = [(f, f["elev"]) for f in features]
         except KeyError:
-            QMessageBox.critical(None, "Contours2Surface", "Each feature must have a 'name' field: top, middle, bottom.")
+            QMessageBox.critical(None, "Contours2Surface", "All features must have an 'elev' field.")
             return
 
-        required_names = ["top", "middle", "bottom"]
-        if not all(name in contours_dict for name in required_names):
-            QMessageBox.critical(None, "Contours2Surface", "Missing one or more required features named: top, middle, bottom.")
-            return
+        # Sort by elevation descending (top to bottom)
+        features_sorted = sorted(features_with_elev, key=lambda x: x[1], reverse=True)
+        contours_ordered = [f[0] for f in features_sorted]
+        elevations = [f[1] for f in features_sorted]
 
-        try:
-            elev_top = contours_dict["top"]["elev"]
-            elev_mid = contours_dict["middle"]["elev"]
-            elev_bot = contours_dict["bottom"]["elev"]
-        except KeyError:
-            QMessageBox.critical(None, "Contours2Surface", "All contours must have an 'elev' field.")
-            return
-
-        if not (elev_top > elev_mid > elev_bot):
+        # Optional: Check that elevations are strictly decreasing
+        if any(e1 <= e2 for e1, e2 in zip(elevations, elevations[1:])):
             QMessageBox.critical(None, "Contours2Surface",
-                                 f"Elevation order invalid:\nTop: {elev_top}, Middle: {elev_mid}, Bottom: {elev_bot}\nExpected: top > middle > bottom")
+                                 f"Elevation values must be strictly decreasing from top to bottom.\nGot: {elevations}")
             return
 
         # Show the mesh input dialog
@@ -134,19 +145,37 @@ class Contours2SurfacePlugin:
             QMessageBox.warning(None, "Contours2Surface", "Please fill in all required fields.")
             return
 
-        fault_contours = [contours_dict[name] for name in required_names]
-
         def feature_to_geojson(f):
+            props = f.attributes()
+            fields = [field.name() for field in f.fields()]
+            props_dict = {field: f[field] for field in fields}
+
+            # Ensure 'elev' is explicitly included
+            props_dict["elev"] = f["elev"]
+
             return {
                 "type": "Feature",
                 "geometry": json.loads(f.geometry().asJson()),
-                "properties": {"name": f["name"], "elev": f["elev"]}
+                "properties": props_dict
             }
 
-        geojson_features = [feature_to_geojson(f) for f in fault_contours]
+        geojson_features = [feature_to_geojson(f) for f in contours_ordered]
 
         try:
             prepped = prepare_fault_contours(geojson_features, pt_distance=spacing, elevation_path=elevation_path)
+            # Estimate mesh complexity before meshing
+            estimated_triangles = estimate_triangle_count(prepped, spacing)
+            print(f"Estimated triangle count: {estimated_triangles}")
+            MAX_TRIANGLES = 50_000
+
+            if estimated_triangles > MAX_TRIANGLES:
+                QMessageBox.critical(None, "Mesh too large",
+                                     f"Mesh would generate approximately {estimated_triangles:,} triangles, "
+                                     f"which exceeds the safe limit of {MAX_TRIANGLES:,}.\n"
+                                     f"Please increase spacing to reduce complexity.")
+                return
+
+            # Mesh generation
             mesh = make_mesh_from_prepared_contours(prepped, down_dip_pt_spacing=spacing)
             tri_mesh = make_tri_mesh(mesh)
 

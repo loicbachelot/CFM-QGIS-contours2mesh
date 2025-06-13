@@ -8,13 +8,18 @@ class MeshInputDialog(QDialog):
     def __init__(self, default_path=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Generate 3D Surface from Contours")
-        self.resize(500, 150)  # Make the dialog wider
-
+        self.resize(500, 150)
+        self.min_spacing = 0.01
+        self.max_spacing = 10.0
         self.name_input = QLineEdit()
+
         self.spacing_input = QDoubleSpinBox()
-        self.spacing_input.setDecimals(3)
+        self.spacing_input.setDecimals(2)
         self.spacing_input.setMinimum(0.01)
+        self.spacing_input.setMaximum(10.0)
+        self.spacing_input.setSingleStep(0.01)
         self.spacing_input.setValue(0.5)
+        self.spacing_input.setToolTip("Spacing between points (in km). Must be ≥ 0.01.")
 
         self.path_input = QLineEdit(default_path or os.path.expanduser("~/output_fault.geojson"))
         self.browse_button = QPushButton("Browse")
@@ -33,12 +38,11 @@ class MeshInputDialog(QDialog):
         name_layout.addWidget(self.name_input)
         form_layout.addLayout(name_layout)
 
-        # Adding optional elevation file
+        # Elevation file (optional)
         elevation_layout = QHBoxLayout()
         elevation_layout.addWidget(self.elevation_label)
         elevation_layout.addWidget(self.elevation_path)
         elevation_layout.addWidget(self.elevation_browse)
-
         form_layout.addLayout(elevation_layout)
 
         # Point spacing
@@ -56,15 +60,16 @@ class MeshInputDialog(QDialog):
 
         # OK/Cancel buttons
         button_layout = QHBoxLayout()
-        ok_btn = QPushButton("OK")
+        self.ok_btn = QPushButton("OK")
         cancel_btn = QPushButton("Cancel")
-        ok_btn.clicked.connect(self.accept)
+        self.ok_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(self.ok_btn)
         button_layout.addWidget(cancel_btn)
         form_layout.addLayout(button_layout)
 
         self.setLayout(form_layout)
+
 
     def choose_file(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -83,5 +88,5 @@ class MeshInputDialog(QDialog):
             self.name_input.text(),
             float(self.spacing_input.text()),
             self.path_input.text(),
-            self.elevation_path.text().strip() or None  # Return None if not set
+            self.elevation_path.text().strip() or None
         )
