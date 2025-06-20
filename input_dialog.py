@@ -1,16 +1,37 @@
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QDoubleSpinBox, QPushButton, QFileDialog
+    QDoubleSpinBox, QPushButton, QFileDialog,
+    QListWidget, QListWidgetItem, QCheckBox, QWidget, QDialogButtonBox
 )
+from qgis.PyQt.QtCore import Qt
 import os
 
+
+class ContourListItem(QWidget):
+    def __init__(self, name, depth, checked=True):
+        super().__init__()
+        self.name = name
+        self.depth = depth
+        self.checkbox = QCheckBox(f"{name} (Depth: {depth})")
+        self.checkbox.setChecked(checked)
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.checkbox)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+
+    def is_checked(self):
+        return self.checkbox.isChecked()
+
+
 class MeshInputDialog(QDialog):
-    def __init__(self, default_path=None, parent=None):
+    def __init__(self, contours, default_path=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Generate 3D Surface from Contours")
-        self.resize(500, 150)
+        self.resize(500, 500)
         self.min_spacing = 0.01
         self.max_spacing = 10.0
+        self.contour_data = contours
         self.name_input = QLineEdit()
 
         self.spacing_input = QDoubleSpinBox()
@@ -29,6 +50,18 @@ class MeshInputDialog(QDialog):
         self.elevation_path = QLineEdit()
         self.elevation_browse = QPushButton("Browse...")
         self.elevation_browse.clicked.connect(self.select_elevation_file)
+
+        self.contour_list = QListWidget()
+        self.contour_list.setDragDropMode(QListWidget.InternalMove)
+        self.contour_list.setDefaultDropAction(Qt.MoveAction)
+
+        # Sort by depth initially
+        for c in sorted(self.contour_data, key=lambda x: -x['depth']):
+            item = QListWidgetItem()
+            widget = ContourListItem(c['name'], c['depth'])
+            item.setSizeHint(widget.sizeHint())
+            self.contour_list.addItem(item)
+            self.contour_list.setItemWidget(item, widget)
 
         form_layout = QVBoxLayout()
 
@@ -57,6 +90,10 @@ class MeshInputDialog(QDialog):
         path_layout.addWidget(self.path_input)
         path_layout.addWidget(self.browse_button)
         form_layout.addLayout(path_layout)
+
+        # contours list controls
+        form_layout.addWidget(QLabel("Contours to include (you can reorder them):"))
+        form_layout.addWidget(self.contour_list)
 
         # OK/Cancel buttons
         button_layout = QHBoxLayout()
@@ -90,3 +127,16 @@ class MeshInputDialog(QDialog):
             self.path_input.text(),
             self.elevation_path.text().strip() or None
         )
+
+    def get_selected_contours(self):
+        selected = []
+        for i in range(self.contour_list.count()):
+            item = self.contour_list.item(i)
+            widget = self.contour_list.itemWidget(item)
+            if widget.is_checked():
+                # Match original QgsFeature
+                for c in self.contour_data:
+                    if c['name'] == widget.name and c['depth'] == widget.depth:
+                        selected.append(c['feature'])
+                        break
+        return selected

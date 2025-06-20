@@ -1,10 +1,11 @@
 from copy import deepcopy
 from typing import Optional
 
-import rasterio
 import numpy as np
 
 from .constants import EARTH_RAD_KM
+
+from osgeo import gdal, osr
 
 
 def destination_pt_at_bearing_distance(
@@ -123,6 +124,7 @@ def polyline_length(polyline):
     return np.sum(polyline_seg_lengths(polyline))
 
 
+# TODO clean up if not needed
 # def sample_polyline(polyline, dists, last_pt=False):
 #    seg_lengths = polyline_seg_lengths(polyline)
 #    cum_lengths = np.insert(np.cumsum(seg_lengths), 0, 0.0)
@@ -388,7 +390,7 @@ def is_correct_direction(
     else:
         return min_az <= azimuth <= max_az
 
-
+# TODO remove if validating using the gdal version
 def get_values_at_coordinates(geotiff_path, coordinates, low_memory=False,
                               out_of_bounds_val=-9999):
     """
@@ -424,6 +426,43 @@ def get_values_at_coordinates(geotiff_path, coordinates, low_memory=False,
                 except IndexError:
                     values.append(out_of_bounds_val)
         
+    return values
+
+
+def get_values_at_coordinates_gdal(geotiff_path, coordinates, out_of_bounds_val=-9999):
+    """
+    Extract values from a GeoTIFF at given coordinates using GDAL (no rasterio).
+
+    Args:
+        geotiff_path (str): Path to the GeoTIFF file
+        coordinates (list): List of (longitude, latitude) tuples
+        out_of_bounds_val (float): Value to return for coordinates outside the raster bounds
+
+    Returns:
+        list: Values at the specified coordinates
+    """
+    dataset = gdal.Open(geotiff_path)
+    band = dataset.GetRasterBand(1)
+    transform = dataset.GetGeoTransform()
+
+    # Inverse transform: world to pixel
+    inv_transform = gdal.InvGeoTransform(transform)
+    if inv_transform is None:
+        raise RuntimeError("Failed to invert geotransform")
+
+    values = []
+    for lon, lat in coordinates:
+        px, py = gdal.ApplyGeoTransform(inv_transform, lon, lat)
+        px, py = int(px), int(py)
+        if 0 <= px < dataset.RasterXSize and 0 <= py < dataset.RasterYSize:
+            try:
+                structval = band.ReadAsArray(px, py, 1, 1)
+                values.append(float(structval[0][0]))
+            except Exception:
+                values.append(out_of_bounds_val)
+        else:
+            values.append(out_of_bounds_val)
+
     return values
 
 

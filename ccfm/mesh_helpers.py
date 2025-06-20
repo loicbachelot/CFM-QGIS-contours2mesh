@@ -6,7 +6,8 @@ from .geom import (
     _draw_pt_profile,
     get_contours_from_profiles,
     get_values_at_coordinates,
-    polyline_length
+    polyline_length,
+    get_values_at_coordinates_gdal
 )
 
 def get_invalid_contour_messages(features, min_points=4):
@@ -68,7 +69,7 @@ def prepare_fault_contours(fault_contours, pt_distance=0.5, elevation_path=None)
     if elevation_path:
         try:
             coords_2d = [pt[:2] for pt in contours_out[0]]
-            elevs = get_values_at_coordinates(elevation_path, coords_2d)
+            elevs = get_values_at_coordinates_gdal(elevation_path, coords_2d)
             for j, elev in enumerate(elevs):
                 contours_out[0][j][2] = elev
             print("Interpolated elevation applied to top contour.")

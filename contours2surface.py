@@ -119,19 +119,14 @@ class Contours2SurfacePlugin:
             QMessageBox.critical(None, "Contours2Surface", "All features must have an 'elev' field.")
             return
 
-        # Sort by elevation descending (top to bottom)
-        features_sorted = sorted(features_with_elev, key=lambda x: x[1], reverse=True)
-        contours_ordered = [f[0] for f in features_sorted]
-        elevations = [f[1] for f in features_sorted]
-
-        # Optional: Check that elevations are strictly decreasing
-        if any(e1 <= e2 for e1, e2 in zip(elevations, elevations[1:])):
-            QMessageBox.critical(None, "Contours2Surface",
-                                 f"Elevation values must be strictly decreasing from top to bottom.\nGot: {elevations}")
-            return
+        contours = []
+        for f in features:
+            name = f["name"] if "name" in f.fields().names() else "Unnamed"
+            depth = f["elev"] if "elev" in f.fields().names() else 0
+            contours.append({'name': name, 'depth': depth, 'feature': f})
 
         # Show the mesh input dialog
-        dlg = MeshInputDialog()
+        dlg = MeshInputDialog(contours)
         if not dlg.exec_():
             return  # user cancelled
 
@@ -159,8 +154,7 @@ class Contours2SurfacePlugin:
                 "properties": props_dict
             }
 
-        geojson_features = [feature_to_geojson(f) for f in contours_ordered]
-
+        geojson_features = [feature_to_geojson(f) for f in dlg.get_selected_contours()]
         try:
             prepped = prepare_fault_contours(geojson_features, pt_distance=spacing, elevation_path=elevation_path)
             # Estimate mesh complexity before meshing
