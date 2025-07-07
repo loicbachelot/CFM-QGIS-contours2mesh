@@ -113,7 +113,7 @@ def terminal_coords_from_bearing_dist(lon1: float, lat1: float, bearing, dist):
 def polyline_seg_lengths(polyline):
     seg_lengths = np.array(
         [
-            haversine_distance(*polyline[i], *polyline[i + 1])
+            haversine_distance(*polyline[i][:2], *polyline[i + 1][:2])
             for i in range(len(polyline) - 1)
         ]
     )

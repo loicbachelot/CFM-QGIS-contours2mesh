@@ -54,16 +54,18 @@ def prepare_fault_contours(fault_contours, pt_distance=0.5, elevation_path=None)
         )
 
     trace_sampled = sample_polyline(coords, pt_distance=pt_distance)
-    trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
+    if len(trace_sampled[0]) == 2:
+        trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
     contours_out = [trace_sampled]
 
     # Resample other contours to match point count
     n_trace_pts = len(trace_sampled)
     print(f"Number of points: {n_trace_pts} (prepare contours)")
-    for trace in fault_contours[1:]:
-        trace_sampled = sample_polyline_to_n_pts(trace['geometry']['coordinates'], n_trace_pts)
-        trace_sampled = add_fixed_elev_to_trace(trace_sampled, trace['properties']['elev'])
-        contours_out.append(trace_sampled)
+    for contour in fault_contours[1:]:
+        contour_sampled = sample_polyline_to_n_pts(contour['geometry']['coordinates'], n_trace_pts)
+        if len(contour_sampled[0]) == 2:
+            contour_sampled = add_fixed_elev_to_trace(contour_sampled, contour['properties']['elev'])
+        contours_out.append(contour_sampled)
 
     # Optional raster elevation logic for top only
     if elevation_path:
