@@ -105,53 +105,55 @@ class Contours2SurfacePlugin:
             self.iface.removeToolBarIcon(action)
 
     def run(self):
-        selected_layers = self.iface.layerTreeView().selectedLayers()
-
-        if len(selected_layers) != 1:
-            QMessageBox.warning(None, "Contours2Surface", "Please select one layer containing at least 2 contour features.")
+        # Check if there's a suitable layer already selected/active
+        preselected_layer = None
+        
+        # Try getting the active layer first
+        active_layer = self.iface.activeLayer()
+        if active_layer:
+            from .input_dialog import is_valid_linestring_layer
+            if is_valid_linestring_layer(active_layer):
+                preselected_layer = active_layer
+        
+        # If no active layer, try selected layers
+        if not preselected_layer:
+            selected_layers = self.iface.layerTreeView().selectedLayers()
+            if len(selected_layers) == 1:
+                from .input_dialog import is_valid_linestring_layer
+                layer = selected_layers[0]
+                if is_valid_linestring_layer(layer):
+                    preselected_layer = layer
+        
+        # Always open the dialog, but with preselected layer if available
+        dlg = MeshInputDialog(None, preselected_layer=preselected_layer)
+        if not dlg.exec_():
+            return  # user cancelled
+        
+        # Get the selected layer from the dialog
+        layer = dlg.get_selected_layer()
+        if not layer:
+            QMessageBox.warning(None, "Contours2Surface", "Please select a layer containing contour features.")
             return
-
-        layer = selected_layers[0]
-        features = [f for f in layer.getFeatures()]
-
-        # Check geometry type of each feature
-        for f in features:
-            geom = f.geometry()
-            geom_type = QgsWkbTypes.flatType(geom.wkbType())
-            if geom_type != QgsWkbTypes.LineString:
-                QMessageBox.critical(None, "Contours2Surface",
-                                     f"Invalid geometry type: {QgsWkbTypes.displayString(geom.wkbType())}. "
-                                     f"All features must be simple LineStrings.")
-                return
-
+            
+        # Get the selected contours from the dialog
+        contours = dlg.get_selected_contours()
+        if not contours:
+            QMessageBox.warning(None, "Contours2Surface", "Please select at least one contour feature.")
+            return
+            
+        # Extract features for validation
+        features = [c['feature'] for c in contours]
+        
+        # Validate the selected contours
         errors = get_invalid_contour_messages(features)
-
         if errors:
             error_msg = "The following contour features are invalid:\n" + "\n".join(errors)
             QMessageBox.critical(None, "Invalid Contours", error_msg)
             return  # Cancel processing
 
-        if len(features) < 2:
-            QMessageBox.critical(None, "Contours2Surface", "Selected layer must contain at least 2 contours.")
+        if len(contours) < 2:
+            QMessageBox.critical(None, "Contours2Surface", "Please select at least 2 contours.")
             return
-
-        #try:
-        #    # Extract features with their elevation
-        #    features_with_elev = [(f, f["elev"]) for f in features]
-        #except KeyError:
-        #    QMessageBox.critical(None, "Contours2Surface", "All features must have an 'elev' field.")
-        #    return
-
-        contours = []
-        for f in features:
-            name = f["name"] if "name" in f.fields().names() else "Unnamed"
-            elev = _qvariant_to_float(f["elev"]) if "elev" in f.fields().names() else None
-            contours.append({'name': name, 'elev': elev, 'feature': f})
-
-        # Show the mesh input dialog
-        dlg = MeshInputDialog(contours)
-        if not dlg.exec_():
-            return  # user cancelled
 
         name, spacing, out_path, elevation_path = dlg.get_values()
         print("Contours2Surface Parameters:")
@@ -176,7 +178,7 @@ class Contours2SurfacePlugin:
                 "properties": props_dict
             }
 
-        geojson_features = [feature_to_geojson(f) for f in dlg.get_selected_contours()]
+        geojson_features = [feature_to_geojson(c['feature']) for c in contours]
         try:
             prepped = prepare_fault_contours(geojson_features, pt_distance=spacing, elevation_path=elevation_path)
             # Estimate mesh complexity before meshing
