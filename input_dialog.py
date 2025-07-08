@@ -8,11 +8,11 @@ import os
 
 
 class ContourListItem(QWidget):
-    def __init__(self, name, depth, checked=True):
+    def __init__(self, name, elev, checked=True):
         super().__init__()
         self.name = name
-        self.depth = depth
-        self.checkbox = QCheckBox(f"{name} (Depth: {depth})")
+        self.elev = elev
+        self.checkbox = QCheckBox(f"{name} (Elevation: {elev})")
         self.checkbox.setChecked(checked)
 
         layout = QHBoxLayout()
@@ -55,10 +55,16 @@ class MeshInputDialog(QDialog):
         self.contour_list.setDragDropMode(QListWidget.InternalMove)
         self.contour_list.setDefaultDropAction(Qt.MoveAction)
 
-        # Sort by depth initially
-        for c in sorted(self.contour_data, key=lambda x: -x['depth']):
+        # Try sort by depth initially
+        #try:
+        sorted_contours = sorted(self.contour_data, 
+                key=lambda x: float('inf') if x['elev'] is None else -float(x['elev'])
+        )
+        #except:
+        #    sorted_contours = self.contour_data
+        for c in sorted_contours:
             item = QListWidgetItem()
-            widget = ContourListItem(c['name'], c['depth'])
+            widget = ContourListItem(c['name'], c['elev'])
             item.setSizeHint(widget.sizeHint())
             self.contour_list.addItem(item)
             self.contour_list.setItemWidget(item, widget)
@@ -136,7 +142,7 @@ class MeshInputDialog(QDialog):
             if widget.is_checked():
                 # Match original QgsFeature
                 for c in self.contour_data:
-                    if c['name'] == widget.name and c['depth'] == widget.depth:
+                    if c['name'] == widget.name and c['elev'] == widget.elev:
                         selected.append(c['feature'])
                         break
         return selected

@@ -22,7 +22,7 @@
  ***************************************************************************/
 """
 
-from qgis.PyQt.QtCore import QCoreApplication, QSettings, QTranslator
+from qgis.PyQt.QtCore import QCoreApplication, QSettings, QTranslator, QVariant
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox, QFileDialog, QInputDialog
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
@@ -31,6 +31,29 @@ import os, tempfile, json
 from .ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
 from .ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours, get_invalid_contour_messages, estimate_triangle_count
 from .input_dialog import MeshInputDialog
+
+
+def _qvariant_to_float(qvar, return_none=False):
+
+    try:
+        val = float(qvar)
+    except:
+
+        if qvar is None or isinstance(qvar, QVariant) and qvar.isNull():
+            val = None
+
+        elif isinstance(qvar, QVariant) and hasattr(qvar, "value"):
+            val = float(qvar.value())
+
+        elif isinstance(qvar, QVariant):
+            val = qvar.toDouble()[0]
+
+        else:
+            if return_none:
+                val = None
+            else:
+                raise ValueError(f"Cannot turn {qvar} to float")
+    return val
 
 
 class Contours2SurfacePlugin:
@@ -112,18 +135,18 @@ class Contours2SurfacePlugin:
             QMessageBox.critical(None, "Contours2Surface", "Selected layer must contain at least 2 contours.")
             return
 
-        try:
-            # Extract features with their elevation
-            features_with_elev = [(f, f["elev"]) for f in features]
-        except KeyError:
-            QMessageBox.critical(None, "Contours2Surface", "All features must have an 'elev' field.")
-            return
+        #try:
+        #    # Extract features with their elevation
+        #    features_with_elev = [(f, f["elev"]) for f in features]
+        #except KeyError:
+        #    QMessageBox.critical(None, "Contours2Surface", "All features must have an 'elev' field.")
+        #    return
 
         contours = []
         for f in features:
             name = f["name"] if "name" in f.fields().names() else "Unnamed"
-            depth = f["elev"] if "elev" in f.fields().names() else 0
-            contours.append({'name': name, 'depth': depth, 'feature': f})
+            elev = _qvariant_to_float(f["elev"]) if "elev" in f.fields().names() else None
+            contours.append({'name': name, 'elev': elev, 'feature': f})
 
         # Show the mesh input dialog
         dlg = MeshInputDialog(contours)
@@ -141,7 +164,6 @@ class Contours2SurfacePlugin:
             return
 
         def feature_to_geojson(f):
-            props = f.attributes()
             fields = [field.name() for field in f.fields()]
             props_dict = {field: f[field] for field in fields}
 
