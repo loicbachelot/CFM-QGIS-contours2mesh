@@ -126,21 +126,19 @@ class Contours2SurfacePlugin:
         
         # Always open the dialog, but with preselected layer if available
         dlg = MeshInputDialog(None, preselected_layer=preselected_layer)
-        if not dlg.exec_():
-            return  # user cancelled
         
-        # Get the selected layer from the dialog
+        # Connect to the process signal
+        dlg.process_requested.connect(lambda: self.process_contours(dlg))
+        
+        # Show dialog and keep it open until user closes it
+        dlg.exec_()
+    
+    def process_contours(self, dlg):
+        """Process the contours based on dialog settings"""
+        # Get the selected layer and contours from the dialog
         layer = dlg.get_selected_layer()
-        if not layer:
-            QMessageBox.warning(None, "Contours2Surface", "Please select a layer containing contour features.")
-            return
-            
-        # Get the selected contours from the dialog
         contours = dlg.get_selected_contours()
-        if not contours:
-            QMessageBox.warning(None, "Contours2Surface", "Please select at least one contour feature.")
-            return
-            
+        
         # Extract features for validation
         features = [c['feature'] for c in contours]
         
@@ -151,19 +149,21 @@ class Contours2SurfacePlugin:
             QMessageBox.critical(None, "Invalid Contours", error_msg)
             return  # Cancel processing
 
-        if len(contours) < 2:
-            QMessageBox.critical(None, "Contours2Surface", "Please select at least 2 contours.")
-            return
-
         name, spacing, out_path, elevation_path = dlg.get_values()
+        
+        # Handle temporary file output
+        if dlg.is_using_temp_file():
+            # Create a temporary file
+            temp_file = tempfile.NamedTemporaryFile(suffix='.geojson', delete=False)
+            out_path = temp_file.name
+            temp_file.close()
+        
         print("Contours2Surface Parameters:")
         print(f"  name: {name}")
         print(f"  spacing: {spacing}")
         print(f"  output path: {out_path}")
         print(f"  elevation path: {elevation_path if elevation_path else 'None'}")
-        if not name.strip() or not out_path.strip():
-            QMessageBox.warning(None, "Contours2Surface", "Please fill in all required fields.")
-            return
+        print(f"  using temp file: {dlg.is_using_temp_file()}")
 
         def feature_to_geojson(f):
             fields = [field.name() for field in f.fields()]
@@ -202,6 +202,7 @@ class Contours2SurfacePlugin:
             result_layer = QgsVectorLayer(out_path, name, "ogr")
             if result_layer.isValid():
                 QgsProject.instance().addMapLayer(result_layer)
+                QMessageBox.information(None, "Success", f"Mesh '{name}' generated successfully!")
             else:
                 raise RuntimeError("Generated mesh layer could not be loaded.")
 

@@ -4,7 +4,7 @@ from qgis.PyQt.QtWidgets import (
     QListWidget, QListWidgetItem, QCheckBox, QWidget, QDialogButtonBox,
     QComboBox, QMessageBox
 )
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
 import os
 
@@ -37,11 +37,16 @@ class ContourListItem(QWidget):
         super().__init__()
         self.name = name
         self.elev = elev
-        self.checkbox = QCheckBox(f"{name} (Elevation: {elev})")
+        self.checkbox = QCheckBox()
         self.checkbox.setChecked(checked)
-
+        
+        # Create a label for the text
+        self.label = QLabel(f"{name} (Elevation: {elev})")
+        
         layout = QHBoxLayout()
         layout.addWidget(self.checkbox)
+        layout.addWidget(self.label)
+        layout.addStretch()  # Push everything to the left
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
@@ -50,6 +55,8 @@ class ContourListItem(QWidget):
 
 
 class MeshInputDialog(QDialog):
+    process_requested = pyqtSignal()
+    
     def __init__(self, contours, default_path=None, preselected_layer=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Generate 3D Surface from Contours")
@@ -80,18 +87,17 @@ class MeshInputDialog(QDialog):
         self.spacing_input.setValue(0.5)
         self.spacing_input.setToolTip("Spacing between points (in km). Must be ≥ 0.01.")
 
-        self.path_input = QLineEdit(default_path or os.path.expanduser("~/output_fault.geojson"))
-        self.browse_button = QPushButton("Browse")
+        self.path_input = QLineEdit("[Save to temporary file]")
+        self.path_input.setReadOnly(True)
+        self.browse_button = QPushButton("...")
+        self.browse_button.setMaximumWidth(30)
+        self.browse_button.setToolTip("Save to file")
         self.browse_button.clicked.connect(self.choose_file)
+        self.is_temp_file = True
 
-        self.elevation_label = QLabel("Elevation Raster (optional):")
-        self.elevation_path = QLineEdit()
-        self.elevation_browse = QPushButton("Browse...")
-        self.elevation_browse.clicked.connect(self.select_elevation_file)
 
         self.contour_list = QListWidget()
-        self.contour_list.setDragDropMode(QListWidget.InternalMove)
-        self.contour_list.setDefaultDropAction(Qt.MoveAction)
+        self.contour_list.setSelectionMode(QListWidget.SingleSelection)
 
         # Set up layer selection and connect signals
         self.layer_combo.currentTextChanged.connect(self.on_layer_changed)
@@ -119,12 +125,6 @@ class MeshInputDialog(QDialog):
         name_layout.addWidget(self.name_input)
         form_layout.addLayout(name_layout)
 
-        # Elevation file (optional)
-        elevation_layout = QHBoxLayout()
-        elevation_layout.addWidget(self.elevation_label)
-        elevation_layout.addWidget(self.elevation_path)
-        elevation_layout.addWidget(self.elevation_browse)
-        form_layout.addLayout(elevation_layout)
 
         # Point spacing
         spacing_layout = QHBoxLayout()
@@ -132,25 +132,52 @@ class MeshInputDialog(QDialog):
         spacing_layout.addWidget(self.spacing_input)
         form_layout.addLayout(spacing_layout)
 
-        # Output path
+        # Output path - QGIS standard style
         path_layout = QHBoxLayout()
-        path_layout.addWidget(QLabel("Output Path:"))
+        path_layout.addWidget(QLabel("Output:"))
         path_layout.addWidget(self.path_input)
         path_layout.addWidget(self.browse_button)
         form_layout.addLayout(path_layout)
 
-        # contours list controls
+        # contours list controls with buttons
         form_layout.addWidget(QLabel("Contours to include (you can reorder them):"))
-        form_layout.addWidget(self.contour_list)
+        
+        contour_layout = QHBoxLayout()
+        contour_layout.addWidget(self.contour_list)
+        
+        # Buttons for contour list control
+        button_layout = QVBoxLayout()
+        self.move_up_btn = QPushButton("↑")
+        self.move_up_btn.setMaximumWidth(30)
+        self.move_up_btn.setToolTip("Move selected contour up")
+        self.move_up_btn.clicked.connect(self.move_contour_up)
+        
+        self.move_down_btn = QPushButton("↓")
+        self.move_down_btn.setMaximumWidth(30)
+        self.move_down_btn.setToolTip("Move selected contour down")
+        self.move_down_btn.clicked.connect(self.move_contour_down)
+        
+        self.remove_btn = QPushButton("✕")
+        self.remove_btn.setMaximumWidth(30)
+        self.remove_btn.setToolTip("Remove selected contour from list")
+        self.remove_btn.clicked.connect(self.remove_contour)
+        
+        button_layout.addWidget(self.move_up_btn)
+        button_layout.addWidget(self.move_down_btn)
+        button_layout.addWidget(self.remove_btn)
+        button_layout.addStretch()  # Push buttons to top
+        
+        contour_layout.addLayout(button_layout)
+        form_layout.addLayout(contour_layout)
 
-        # OK/Cancel buttons
+        # Run/Close buttons
         button_layout = QHBoxLayout()
-        self.ok_btn = QPushButton("OK")
-        cancel_btn = QPushButton("Cancel")
-        self.ok_btn.clicked.connect(self.accept)
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(self.ok_btn)
-        button_layout.addWidget(cancel_btn)
+        self.run_btn = QPushButton("Run")
+        close_btn = QPushButton("Close")
+        self.run_btn.clicked.connect(self.validate_and_accept)
+        close_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.run_btn)
+        button_layout.addWidget(close_btn)
         form_layout.addLayout(button_layout)
 
         self.setLayout(form_layout)
@@ -158,15 +185,16 @@ class MeshInputDialog(QDialog):
 
     def choose_file(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Output Mesh As", self.path_input.text(), "GeoJSON (*.geojson);;All Files (*)"
+            self, "Save Output Mesh As", "", "GeoJSON (*.geojson);;All Files (*)"
         )
         if path:
             self.path_input.setText(path)
+            self.is_temp_file = False
+        else:
+            # User cancelled, keep temporary file
+            self.path_input.setText("[Save to temporary file]")
+            self.is_temp_file = True
 
-    def select_elevation_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Elevation Raster", "", "GeoTIFF (*.tif *.tiff)")
-        if path:
-            self.elevation_path.setText(path)
     
     def load_layer_from_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -288,9 +316,100 @@ class MeshInputDialog(QDialog):
         return (
             self.name_input.text(),
             float(self.spacing_input.text()),
-            self.path_input.text(),
-            self.elevation_path.text().strip() or None
+            self.path_input.text() if not self.is_temp_file else None,
+            None  # elevation_path removed
         )
+    
+    def get_output_path(self):
+        """Get the output path, None if using temporary file"""
+        return self.path_input.text() if not self.is_temp_file else None
+    
+    def is_using_temp_file(self):
+        """Check if using temporary file output"""
+        return self.is_temp_file
+    
+    def move_contour_up(self):
+        """Move the selected contour up in the list"""
+        current_row = self.contour_list.currentRow()
+        if current_row > 0:
+            # Get the current widget and its data
+            current_item = self.contour_list.item(current_row)
+            current_widget = self.contour_list.itemWidget(current_item)
+            
+            # Store the widget data
+            name = current_widget.name
+            elev = current_widget.elev
+            checked = current_widget.is_checked()
+            
+            # Remove the current item
+            self.contour_list.takeItem(current_row)
+            
+            # Create new item and widget at the new position
+            new_item = QListWidgetItem()
+            new_widget = ContourListItem(name, elev, checked)
+            new_item.setSizeHint(new_widget.sizeHint())
+            self.contour_list.insertItem(current_row - 1, new_item)
+            self.contour_list.setItemWidget(new_item, new_widget)
+            
+            # Select the moved item
+            self.contour_list.setCurrentRow(current_row - 1)
+    
+    def move_contour_down(self):
+        """Move the selected contour down in the list"""
+        current_row = self.contour_list.currentRow()
+        if current_row < self.contour_list.count() - 1 and current_row >= 0:
+            # Get the current widget and its data
+            current_item = self.contour_list.item(current_row)
+            current_widget = self.contour_list.itemWidget(current_item)
+            
+            # Store the widget data
+            name = current_widget.name
+            elev = current_widget.elev
+            checked = current_widget.is_checked()
+            
+            # Remove the current item
+            self.contour_list.takeItem(current_row)
+            
+            # Create new item and widget at the new position
+            new_item = QListWidgetItem()
+            new_widget = ContourListItem(name, elev, checked)
+            new_item.setSizeHint(new_widget.sizeHint())
+            self.contour_list.insertItem(current_row + 1, new_item)
+            self.contour_list.setItemWidget(new_item, new_widget)
+            
+            # Select the moved item
+            self.contour_list.setCurrentRow(current_row + 1)
+    
+    def remove_contour(self):
+        """Remove the selected contour from the list"""
+        current_row = self.contour_list.currentRow()
+        if current_row >= 0:
+            self.contour_list.takeItem(current_row)
+    
+    def validate_and_accept(self):
+        """Validate inputs before accepting the dialog"""
+        # Check if fault name is provided
+        if not self.name_input.text().strip():
+            QMessageBox.warning(self, "Missing Input", "Please enter a fault name.")
+            return
+        
+        # Check if a layer is selected
+        if not self.selected_layer:
+            QMessageBox.warning(self, "Missing Input", "Please select a layer containing contour features.")
+            return
+        
+        # Check if contours are selected
+        selected_contours = self.get_selected_contours()
+        if not selected_contours:
+            QMessageBox.warning(self, "Missing Input", "Please select at least one contour feature.")
+            return
+        
+        if len(selected_contours) < 2:
+            QMessageBox.warning(self, "Insufficient Contours", "Please select at least 2 contours.")
+            return
+        
+        # All validation passed, emit a signal instead of accepting
+        self.process_requested.emit()
 
     def get_selected_layer(self):
         return self.selected_layer
