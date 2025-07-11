@@ -3,16 +3,16 @@
 # This file should be included when you package your plugin.# Mandatory items:
 
 [general]
-name=Contours2Surface
+name=Contours2Mesh
 qgisMinimumVersion=3.0
-description=Generate 3D fault surfaces or geological meshes from top, middle, and bottom contour lines in QGIS.
-version=0.1
+description=Generate 3D fault surfaces or geological meshes from a set of contour lines in QGIS.
+version=1.0.0
 author=CRESCENT
-email=lbachelo@uoregon.edu
+email=crescentcfm@cascadiaquakes.org
 
 about=Contours2Surface is a QGIS plugin designed to help geoscientists and GIS users convert sets of top, middle, and bottom LineString features into a structured 3D surface or fault mesh. It is especially useful for visualizing geological features such as faults or stratigraphic layers in 3D. The plugin leverages existing line geometries and builds a triangular mesh surface suitable for further analysis or export.
 
-tracker=http://bugs
+tracker=http://bugsS
 repository=http://repo
 # End of mandatory metadata
 
