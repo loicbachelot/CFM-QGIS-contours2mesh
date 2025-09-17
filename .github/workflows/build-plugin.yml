@@ -46,7 +46,6 @@ jobs:
       #     [ "$TAG" = "$EXPECTED" ] || { echo "ccfm not at $EXPECTED (got $TAG)"; exit 1; }
 
       - name: Build plugin zip
-        working-directory: contours2mesh
         run: |
           pb_tool zip
           ls -lah zip_build
@@ -55,4 +54,4 @@ jobs:
       - name: Upload plugin .zip to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: contours2mesh/zip_build/contours2mesh.zip
+          files: zip_build/contours2mesh.zip
