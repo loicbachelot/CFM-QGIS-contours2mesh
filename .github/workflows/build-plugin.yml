@@ -34,8 +34,8 @@ jobs:
       # Guardrails so we fail fast if the submodule wasn't pulled
       - name: Verify ccfm submodule present
         run: |
-          test -f contours2mesh/vendor/ccfm/pyproject.toml
-          test -f contours2mesh/vendor/ccfm/ccfm/__init__.py
+          test -f vendor/ccfm/pyproject.toml
+          test -f vendor/ccfm/ccfm/__init__.py
 
       # (Optional) enforce the tag you expect for ccfm; update as you bump it
       # - name: Verify ccfm tag
