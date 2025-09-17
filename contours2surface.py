@@ -28,8 +28,8 @@ from qgis.PyQt.QtWidgets import QAction, QMessageBox, QFileDialog, QInputDialog
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
 import os, tempfile, json
 
-from .ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
-from .ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours, get_invalid_contour_messages, estimate_triangle_count
+from ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
+from ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours, get_invalid_contour_messages, estimate_triangle_count
 from .input_dialog import MeshInputDialog
 
 
