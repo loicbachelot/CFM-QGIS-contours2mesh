@@ -23,6 +23,25 @@
  This script initializes the plugin, making it known to QGIS.
 """
 
+# ---- NEW: ensure vendored ccfm is importable before anything else ----
+import sys
+from pathlib import Path
+
+_vendored_repo = Path(__file__).parent / "vendor" / "ccfm"
+if _vendored_repo.is_dir():
+    # Put the repo root on sys.path so `import ccfm` finds ccfm/*.py inside it
+    sys.path.insert(0, str(_vendored_repo))
+
+try:
+    import ccfm  # noqa: F401
+except Exception as e:
+    # Helpful error if dev forgot to init submodules or packaging missed the folder
+    raise ImportError(
+        "ccfm not found. If you are developing locally, run:\n"
+        "    git submodule update --init --recursive\n"
+        "If you installed from a ZIP, please rebuild ensuring vendor/ccfm/** is included."
+    ) from e
+# ----------------------------------------------------------------------
 
 # noinspection PyPep8Naming
 def classFactory(iface):  # pylint: disable=invalid-name
@@ -31,6 +50,5 @@ def classFactory(iface):  # pylint: disable=invalid-name
     :param iface: A QGIS interface instance.
     :type iface: QgsInterface
     """
-    #
     from .contours2surface import Contours2SurfacePlugin
     return Contours2SurfacePlugin(iface)
