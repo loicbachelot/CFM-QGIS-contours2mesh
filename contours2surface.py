@@ -29,12 +29,13 @@ from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
 import os, tempfile, json
 
 from ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
-from ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours, get_invalid_contour_messages, estimate_triangle_count
+from ccfm.mesh_helpers import prepare_fault_contours, make_mesh_from_prepared_contours, get_invalid_contour_messages, \
+    estimate_triangle_count
 from .input_dialog import MeshInputDialog
+from itertools import islice
 
 
 def _qvariant_to_float(qvar, return_none=False):
-
     try:
         val = float(qvar)
     except:
@@ -107,14 +108,14 @@ class Contours2SurfacePlugin:
     def run(self):
         # Check if there's a suitable layer already selected/active
         preselected_layer = None
-        
+
         # Try getting the active layer first
         active_layer = self.iface.activeLayer()
         if active_layer:
             from .input_dialog import is_valid_linestring_layer
             if is_valid_linestring_layer(active_layer):
                 preselected_layer = active_layer
-        
+
         # If no active layer, try selected layers
         if not preselected_layer:
             selected_layers = self.iface.layerTreeView().selectedLayers()
@@ -123,25 +124,120 @@ class Contours2SurfacePlugin:
                 layer = selected_layers[0]
                 if is_valid_linestring_layer(layer):
                     preselected_layer = layer
-        
+
         # Always open the dialog, but with preselected layer if available
         dlg = MeshInputDialog(None, preselected_layer=preselected_layer)
-        
+
         # Connect to the process signal
         dlg.process_requested.connect(lambda: self.process_contours(dlg))
-        
+
         # Show dialog and keep it open until user closes it
         dlg.exec_()
-    
+
     def process_contours(self, dlg):
         """Process the contours based on dialog settings"""
         # Get the selected layer and contours from the dialog
         layer = dlg.get_selected_layer()
         contours = dlg.get_selected_contours()
-        
+
+        crs = layer.crs()
+
+        # ---------- 1) If CRS is defined: require geographic ----------
+        print("checking projection")
+        if crs.isValid():
+            print(crs)
+            if not crs.isGeographic():
+                QMessageBox.critical(
+                    None,
+                    "Invalid CRS",
+                    (
+                        "The contour layer uses a projected CRS.\n\n"
+                        f"Current layer CRS:\n{crs.authid() or 'unknown'} - {crs.description()}\n\n"
+                        "The meshing tools expect longitude/latitude coordinates in a "
+                        "geographic CRS such as EPSG:4326.\n"
+                        "Please reproject your contours to EPSG:4326 in QGIS and try again."
+                    ),
+                )
+                return
+            else:
+                print("valid projection")
+        else:
+            # ---------- 2) If CRS is NOT defined: inspect coordinates ----------
+            def coords_look_lonlat(contour_wrappers, max_features=20, max_points=200):
+                """
+                Check if coordinates look like lon/lat:
+                - lon in [-180, 360]
+                - lat in [-90, 90]
+                """
+                xs = []
+                ys = []
+
+                def collect_coords(geom_json):
+                    gtype = geom_json.get("type")
+                    coords = geom_json.get("coordinates", [])
+
+                    if gtype == "LineString":
+                        for pt in coords:
+                            if len(pt) >= 2:
+                                xs.append(pt[0])
+                                ys.append(pt[1])
+                                if len(xs) >= max_points:
+                                    return True
+                    elif gtype == "MultiLineString":
+                        for line in coords:
+                            for pt in line:
+                                if len(pt) >= 2:
+                                    xs.append(pt[0])
+                                    ys.append(pt[1])
+                                    if len(xs) >= max_points:
+                                        return True
+                    return False
+
+                # Sample up to max_features features and up to max_points points
+                for c in islice(contour_wrappers, max_features):
+                    f = c["feature"]
+                    geom_json = json.loads(f.geometry().asJson())
+                    if collect_coords(geom_json):
+                        break
+
+                if not xs:
+                    # No coordinates to inspect → treat as "doesn't look good"
+                    return False
+
+                min_x = min(xs)
+                max_x = max(xs)
+                min_y = min(ys)
+                max_y = max(ys)
+
+                # Allow lon in [-180, 360] (some datasets use 0–360)
+                if min_x < -180.0 or max_x > 360.0:
+                    return False
+
+                # Lat must be in [-90, 90]
+                if min_y < -90.0 or max_y > 90.0:
+                    return False
+
+                return True
+
+            if not coords_look_lonlat(contours):
+                QMessageBox.critical(
+                    None,
+                    "Invalid contour coordinates",
+                    (
+                        "The contour layer has no CRS defined and the coordinates "
+                        "do not look like longitude/latitude.\n\n"
+                        f"Layer CRS: {crs.authid() or 'undefined'} - {crs.description()}\n\n"
+                        "Contours should be in a geographic CRS (e.g. EPSG:4326) with:\n"
+                        "  - longitude in roughly [-180, 360]\n"
+                        "  - latitude in [-90, 90]\n\n"
+                        "Please define or reproject your contours to EPSG:4326 in QGIS and try again."
+                    ),
+                )
+                return
+
         # Extract features for validation
         features = [c['feature'] for c in contours]
-        
+
         # Validate the selected contours
         errors = get_invalid_contour_messages(features)
         if errors:
@@ -150,14 +246,14 @@ class Contours2SurfacePlugin:
             return  # Cancel processing
 
         name, spacing, out_path, elevation_path = dlg.get_values()
-        
+
         # Handle temporary file output
         if dlg.is_using_temp_file():
             # Create a temporary file
             temp_file = tempfile.NamedTemporaryFile(suffix='.geojson', delete=False)
             out_path = temp_file.name
             temp_file.close()
-        
+
         print("Contours2Surface Parameters:")
         print(f"  name: {name}")
         print(f"  spacing: {spacing}")
@@ -165,12 +261,40 @@ class Contours2SurfacePlugin:
         print(f"  elevation path: {elevation_path if elevation_path else 'None'}")
         print(f"  using temp file: {dlg.is_using_temp_file()}")
 
+        # --- Ensure all contours have a valid numeric elevation ---
+
+        invalid_elev_ids = []
+        for c in contours:
+            f = c["feature"]
+            try:
+                z = _qvariant_to_float(f["elev"], return_none=True)
+            except Exception:
+                z = None
+
+            if z is None:
+                invalid_elev_ids.append(str(f.id()))
+
+        if invalid_elev_ids:
+            QMessageBox.critical(
+                None,
+                "Missing elevations",
+                (
+                    "All selected contours must have a valid numeric 'elev' attribute.\n\n"
+                    "The following feature IDs are missing or have invalid 'elev' values:\n"
+                    f"{', '.join(invalid_elev_ids)}\n\n"
+                    "Please set the 'elev' field for these contours in QGIS and try again."
+                ),
+            )
+            return
+
         def feature_to_geojson(f):
             fields = [field.name() for field in f.fields()]
             props_dict = {field: f[field] for field in fields}
 
             # Ensure 'elev' is explicitly included
-            props_dict["elev"] = f["elev"]
+            elev_raw = f["elev"]
+            elev_val = _qvariant_to_float(elev_raw, return_none=True)
+            props_dict["elev"] = elev_val
 
             return {
                 "type": "Feature",
@@ -206,5 +330,19 @@ class Contours2SurfacePlugin:
             else:
                 raise RuntimeError("Generated mesh layer could not be loaded.")
 
+
         except Exception as e:
+
+            import traceback
+
+            tb = traceback.format_exc()
+
+            print(tb)  # goes to QGIS Python console
+
+            # Or also log to the QGIS log panel:
+
+            from qgis.core import QgsMessageLog, Qgis
+
+            QgsMessageLog.logMessage(tb, "Contours2Surface", Qgis.Critical)
+
             QMessageBox.critical(None, "Contours2Surface Error", str(e))
