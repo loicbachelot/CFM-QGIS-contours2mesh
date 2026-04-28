@@ -26,6 +26,13 @@ from qgis.PyQt.QtCore import QCoreApplication, QSettings, QTranslator, QVariant
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox, QFileDialog, QInputDialog
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
+
+
+def _feature_geometry_has_z(feature):
+    geom = feature.geometry()
+    if geom is None or geom.isEmpty():
+        return False
+    return QgsWkbTypes.hasZ(geom.wkbType())
 import os, tempfile, json
 
 from ccfm.ccfm import make_tri_mesh, write_cfm_tri_meshes
@@ -266,6 +273,8 @@ class Contours2SurfacePlugin:
         invalid_elev_ids = []
         for c in contours:
             f = c["feature"]
+            if _feature_geometry_has_z(f):
+                continue
             try:
                 z = _qvariant_to_float(f["elev"], return_none=True)
             except Exception:
@@ -291,14 +300,30 @@ class Contours2SurfacePlugin:
             fields = [field.name() for field in f.fields()]
             props_dict = {field: f[field] for field in fields}
 
-            # Ensure 'elev' is explicitly included
-            elev_raw = f["elev"]
-            elev_val = _qvariant_to_float(elev_raw, return_none=True)
-            props_dict["elev"] = elev_val
+            geom = f.geometry()
+            if "elev" in fields:
+                props_dict["elev"] = _qvariant_to_float(f["elev"], return_none=True)
+            else:
+                props_dict["elev"] = None
+
+            # asJson() strips Z; build coordinates manually when the geometry has Z
+            # so per-vertex elevations reach prepare_fault_contours.
+            if QgsWkbTypes.hasZ(geom.wkbType()):
+                flat_type = QgsWkbTypes.flatType(geom.wkbType())
+                if flat_type == QgsWkbTypes.LineString:
+                    coords = [[v.x(), v.y(), v.z()] for v in geom.vertices()]
+                    geom_json = {"type": "LineString", "coordinates": coords}
+                else:  # MultiLineString
+                    parts = []
+                    for part in geom.constGet():
+                        parts.append([[p.x(), p.y(), p.z()] for p in part.vertices()])
+                    geom_json = {"type": "MultiLineString", "coordinates": parts}
+            else:
+                geom_json = json.loads(geom.asJson())
 
             return {
                 "type": "Feature",
-                "geometry": json.loads(f.geometry().asJson()),
+                "geometry": geom_json,
                 "properties": props_dict
             }
 
@@ -345,4 +370,4 @@ class Contours2SurfacePlugin:
 
             QgsMessageLog.logMessage(tb, "Contours2Surface", Qgis.Critical)
 
-            QMessageBox.critical(None, "Contours2Surface Error", str(e))
+            QMessageBox.critical(None, "Contours2Surface Error", f"{e}\n\n{tb}")

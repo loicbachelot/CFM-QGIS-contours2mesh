@@ -62,7 +62,7 @@ class MeshInputDialog(QDialog):
         self.setWindowTitle("Generate 3D Surface from Contours")
         self.resize(500, 600)
         self.min_spacing = 0.01
-        self.max_spacing = 10.0
+        self.max_spacing = 1000.0
         self.contour_data = contours
         self.selected_layer = preselected_layer
         self.name_input = QLineEdit()
@@ -81,8 +81,8 @@ class MeshInputDialog(QDialog):
 
         self.spacing_input = QDoubleSpinBox()
         self.spacing_input.setDecimals(2)
-        self.spacing_input.setMinimum(0.01)
-        self.spacing_input.setMaximum(10.0)
+        self.spacing_input.setMinimum(self.min_spacing)
+        self.spacing_input.setMaximum(self.max_spacing)
         self.spacing_input.setSingleStep(0.01)
         self.spacing_input.setValue(0.5)
         self.spacing_input.setToolTip("Spacing between points (in km). Must be ≥ 0.01.")
