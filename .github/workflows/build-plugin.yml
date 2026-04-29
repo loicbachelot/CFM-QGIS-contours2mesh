@@ -49,7 +49,7 @@ jobs:
       - name: Build plugin zip
         run: |
           yes | pb_tool deploy
-          pb_tool zip
+          yes | pb_tool zip
           ls -lah zip_build
           unzip -l zip_build/contours2mesh.zip | grep -E "vendor/ccfm/ccfm/__init__\.py"
 
