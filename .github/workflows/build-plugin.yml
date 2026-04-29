@@ -48,7 +48,7 @@ jobs:
 
       - name: Build plugin zip
         run: |
-          pb_tool dclean
+          yes | pb_tool dclean
           pb_tool deploy
           pb_tool zip
           ls -lah zip_build
