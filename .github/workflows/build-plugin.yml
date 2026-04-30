@@ -50,10 +50,10 @@ jobs:
         run: |
           yes | pb_tool deploy
           yes | pb_tool zip
-          ls -lah zip_build
+          ls -lah
           unzip -l zip_build/contours2mesh.zip | grep -E "vendor/ccfm/ccfm/__init__\.py"
 
       - name: Upload plugin .zip to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: zip_build/contours2mesh.zip
+          files: contours2mesh.zip
