@@ -4,9 +4,10 @@
 
 [general]
 name=Contours2Mesh
-qgisMinimumVersion=3.0
+qgisMinimumVersion=4.0
+qgisMaximumVersion=4.99
 description=Generate 3D fault surfaces or geological meshes from a set of contour lines in QGIS.
-version=1.0.2
+version=1.1.0
 author=CRESCENT
 email=crescentcfm@cascadiaquakes.org
 

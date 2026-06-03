@@ -139,7 +139,7 @@ class Contours2SurfacePlugin:
         dlg.process_requested.connect(lambda: self.process_contours(dlg))
 
         # Show dialog and keep it open until user closes it
-        dlg.exec_()
+        dlg.exec()
 
     def process_contours(self, dlg):
         """Process the contours based on dialog settings"""

@@ -2,7 +2,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QDoubleSpinBox, QPushButton, QFileDialog,
     QListWidget, QListWidgetItem, QCheckBox, QWidget, QDialogButtonBox,
-    QComboBox, QMessageBox
+    QComboBox, QMessageBox, QAbstractItemView
 )
 from qgis.PyQt.QtCore import Qt, pyqtSignal
 from qgis.core import QgsProject, QgsVectorLayer, QgsWkbTypes
@@ -97,7 +97,7 @@ class MeshInputDialog(QDialog):
 
 
         self.contour_list = QListWidget()
-        self.contour_list.setSelectionMode(QListWidget.SingleSelection)
+        self.contour_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
         # Set up layer selection and connect signals
         self.layer_combo.currentTextChanged.connect(self.on_layer_changed)
